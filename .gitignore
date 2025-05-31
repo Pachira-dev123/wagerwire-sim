@@ -2,7 +2,7 @@
 .env
 
 # Generated configuration file (auto-generated from .env)
-js/config.js
+# js/config.js  # Commented out so config.js can be committed for production
 
 # Node.js dependencies
 node_modules/
