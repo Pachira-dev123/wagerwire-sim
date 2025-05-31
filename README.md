@@ -50,7 +50,7 @@ Each character has:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/wagerwire-sim.git
+   git clone https://github.com/Pachira-dev123/wagerwire-sim.git
    cd wagerwire-sim
    ```
 
