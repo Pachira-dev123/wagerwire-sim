@@ -1,0 +1,25 @@
+{
+  "name": "wagerwire-sim",
+  "version": "1.0.0",
+  "description": "Visual betting simulation with 3 characters placing bets and showing emotions",
+  "main": "index.html",
+  "scripts": {
+    "build-config": "node build-config.js",
+    "start": "npm run build-config && npx http-server . -p 3000 -o",
+    "dev": "npm run build-config && npx http-server . -p 3000 -o",
+    "serve": "npx http-server . -p 3000 -o"
+  },
+  "keywords": [
+    "betting",
+    "simulation",
+    "supabase",
+    "canvas",
+    "animation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "http-server": "^14.1.1"
+  }
+} 

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WagerWire Betting Simulation</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Optional: Set credentials via global config -->
+    <script>
+        // Example: Uncomment and set your credentials for auto-connection
+        // window.WAGERWIRE_CONFIG = {
+        //     SUPABASE_URL: 'https://your-project.supabase.co',
+        //     SUPABASE_ANON_KEY: 'your-anon-key-here',
+        //     AUTO_CONNECT: true
+        // };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎰 WagerWire Betting Simulation</h1>
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">Start Simulation</button>
+                <button id="pauseBtn" class="btn btn-secondary" disabled>Pause</button>
+                <button id="resetBtn" class="btn btn-danger">Reset</button>
+                <div class="status">
+                    <span id="statusText">Ready to start</span>
+                    <span id="nextUpdate">Next update in: --</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="simulation-area">
+            <div class="city-container">
+                <canvas id="cityCanvas" width="800" height="600"></canvas>
+                <div class="city-overlay">
+                    <div class="bookie-sign">🏪 BOOKIE</div>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="characters-panel">
+                    <h3>Characters</h3>
+                    <div class="character-cards">
+                        <div class="character-card" data-character="Benny">
+                            <div class="character-avatar benny">B</div>
+                            <div class="character-info">
+                                <h4>Benny</h4>
+                                <div class="bankroll">£<span class="amount">10,000</span></div>
+                                <div class="status">Idle</div>
+                                <div class="emotion">😐</div>
+                            </div>
+                        </div>
+                        <div class="character-card" data-character="Max">
+                            <div class="character-avatar max">M</div>
+                            <div class="character-info">
+                                <h4>Max</h4>
+                                <div class="bankroll">£<span class="amount">10,000</span></div>
+                                <div class="status">Idle</div>
+                                <div class="emotion">😐</div>
+                            </div>
+                        </div>
+                        <div class="character-card" data-character="Ellie">
+                            <div class="character-avatar ellie">E</div>
+                            <div class="character-info">
+                                <h4>Ellie</h4>
+                                <div class="bankroll">£<span class="amount">10,000</span></div>
+                                <div class="status">Idle</div>
+                                <div class="emotion">😐</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bets-panel">
+                    <h3>Active Bets</h3>
+                    <div id="activeBets" class="bets-list">
+                        <div class="no-bets">No active bets</div>
+                    </div>
+                </div>
+
+                <div class="config-panel">
+                    <h3>Configuration</h3>
+                    <div class="config-item">
+                        <label for="supabaseUrl">Supabase URL:</label>
+                        <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co">
+                        <small class="help-text">Your Supabase project URL</small>
+                    </div>
+                    <div class="config-item">
+                        <label for="supabaseKey">Supabase Anon Key:</label>
+                        <input type="password" id="supabaseKey" placeholder="Your anon key">
+                        <small class="help-text">Found in Project Settings → API</small>
+                    </div>
+                    <div class="config-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rememberCredentials">
+                            <span class="checkmark"></span>
+                            Remember credentials (stored locally)
+                        </label>
+                    </div>
+                    <div class="config-buttons">
+                        <button id="connectBtn" class="btn btn-primary">Connect to Supabase</button>
+                        <button id="clearCredentialsBtn" class="btn btn-secondary" style="display: none;">Clear Saved</button>
+                    </div>
+                    <div id="connectionStatus" class="connection-status">Not connected</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="logs-panel">
+            <h3>Simulation Logs</h3>
+            <div id="logs" class="logs-container"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/config.js"></script>
+    <script src="js/betting-engine.js"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/canvas-renderer.js"></script>
+    <script src="js/simulation.js"></script>
+</body>
+</html> 
