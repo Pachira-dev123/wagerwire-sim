@@ -3,7 +3,7 @@
  * Orchestrates character management, bet processing, and real-time updates
  */
 
-class BettingSimulation {
+export class BettingSimulation {
     constructor() {
         this.isRunning = false;
         this.isPaused = false;
@@ -27,6 +27,13 @@ class BettingSimulation {
         
         // Renderer
         this.renderer = null;
+        
+        // Conversation system
+        this.conversationHistory = [];
+        this.conversationCooldowns = new Map(); // Character pairs and their cooldown timers
+        this.conversationChance = 1; // 100% chance per check for nearby characters to talk
+        this.conversationRange = 100; // Distance for characters to interact (3D units) - increased from 25
+        this.conversationInterval = null; // Separate timer for conversation checking
         
         // Event API endpoint
         this.eventApiEndpoint = 'https://us-central1-pachira-betform.cloudfunctions.net/sofascoreProxy/sofascore-event';
@@ -120,11 +127,111 @@ class BettingSimulation {
     }
 
     /**
-     * Setup canvas renderer
+     * Setup renderer (Three.js or fallback)
      */
     setupRenderer() {
-        this.renderer = new CanvasRenderer('cityCanvas');
-        window.simulation = this; // Make simulation accessible to renderer
+        // Ensure DOM is ready
+        const initRenderer = () => {
+            try {
+                // Check if the container exists
+                const container = document.getElementById('threeContainer');
+                if (!container) {
+                    throw new Error('threeContainer element not found');
+                }
+                
+                // Try Three.js first
+                if (typeof THREE !== 'undefined' && typeof ThreeRenderer !== 'undefined') {
+                    console.log('Attempting to initialize Three.js renderer...');
+                    
+                    // Wait a moment for Three.js to fully load
+                    setTimeout(() => {
+                        try {
+                            this.renderer = new ThreeRenderer('threeContainer');
+                            this.rendererType = '3D';
+                            this.log('Three.js 3D renderer initialized successfully', 'success');
+                            
+                            window.simulation = this; // Make simulation accessible to renderer
+                            
+                            // Create characters in the scene
+                            Object.keys(this.characters).forEach(name => {
+                                this.renderer.createCharacter(name);
+                            });
+                            
+                            // Update UI to show renderer type
+                            this.updateRendererStatus();
+                        } catch (threeError) {
+                            console.warn('Three.js initialization failed:', threeError.message);
+                            this.initFallbackRenderer();
+                        }
+                    }, 100);
+                    
+                } else {
+                    throw new Error('Three.js or ThreeRenderer not available');
+                }
+                
+            } catch (error) {
+                console.warn('Three.js setup failed:', error.message);
+                this.initFallbackRenderer();
+            }
+        };
+        
+        // Initialize renderer when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initRenderer);
+        } else {
+            initRenderer();
+        }
+    }
+
+    /**
+     * Initialize fallback renderer
+     */
+    initFallbackRenderer() {
+        this.log('Three.js failed, using fallback 2D renderer', 'warning');
+        
+        try {
+            // Use fallback 2D renderer
+            if (typeof FallbackRenderer !== 'undefined') {
+                this.renderer = new FallbackRenderer('threeContainer');
+                this.rendererType = '2D';
+                this.log('2D fallback renderer initialized successfully', 'success');
+                
+                window.simulation = this; // Make simulation accessible to renderer
+                
+                // Create 2D characters
+                Object.keys(this.characters).forEach(name => {
+                    this.renderer.createCharacter(name);
+                });
+                
+                // Update UI to show renderer type
+                this.updateRendererStatus();
+            } else {
+                throw new Error('FallbackRenderer not available');
+            }
+        } catch (fallbackError) {
+            console.error('Fallback renderer also failed:', fallbackError);
+            this.log(`Both renderers failed: ${fallbackError.message}`, 'error');
+            
+            // Last resort: minimal renderer
+            this.renderer = {
+                getStartingPosition: (name) => ({ x: 0, y: 0, z: 0 }),
+                getBookiePosition: () => ({ x: 0, y: 0, z: 0 }),
+                getRandomPosition: () => ({ x: Math.random() * 100, y: 0, z: Math.random() * 100 }),
+                updateCharacter: () => console.log(`Update character: ${arguments[0]} - ${arguments[1]}`),
+                createCharacter: () => console.log(`Create character: ${arguments[0]}`),
+                startRoaming: () => console.log('Start roaming'),
+                startWalkingFromBookie: () => console.log('Walking from bookie'),
+                addBetToTicker: (betText) => console.log(`Ticker: ${betText}`),
+                clearTicker: () => console.log('Ticker cleared'),
+                reset: () => console.log('Minimal renderer reset'),
+                destroy: () => {}
+            };
+            this.rendererType = 'minimal';
+            this.log('Using minimal console-only renderer', 'warning');
+            
+            // Update UI to show renderer type
+            this.updateRendererStatus();
+        }
     }
 
     /**
@@ -291,6 +398,18 @@ class BettingSimulation {
             // Start the update loop
             this.startUpdateLoop();
             
+            // Start conversation checking (more frequent than main loop)
+            this.startConversationChecking();
+            
+            // Do an immediate conversation check to test the system
+            setTimeout(() => {
+                this.log('🧪 Running initial conversation check...', 'info');
+                this.checkForConversations();
+            }, 2000);
+            
+            // Populate ticker with actual upcoming bets from database
+            this.populateTickerWithUpcomingBets();
+            
             this.log(`Simulation started! Will process ${betCount} bets at 15-second intervals`, 'success');
             
         } catch (error) {
@@ -331,6 +450,10 @@ class BettingSimulation {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
+        if (this.conversationInterval) {
+            clearInterval(this.conversationInterval);
+            this.conversationInterval = null;
+        }
         
         // Reset characters
         Object.keys(this.characters).forEach(name => {
@@ -343,6 +466,16 @@ class BettingSimulation {
         // Clear bet queue
         this.betQueue = [];
         this.currentBetIndex = 0;
+        
+        // Clear conversation history
+        this.conversationHistory = [];
+        this.conversationCooldowns.clear();
+        
+        // Clear conversation UI
+        const conversationArea = document.getElementById('conversationArea');
+        if (conversationArea) {
+            conversationArea.innerHTML = '<div class="no-conversations">Characters will chat between bets...</div>';
+        }
         
         // Reset renderer
         if (this.renderer) {
@@ -365,6 +498,11 @@ class BettingSimulation {
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
+        }
+        
+        if (this.conversationInterval) {
+            clearInterval(this.conversationInterval);
+            this.conversationInterval = null;
         }
         
         // Update UI
@@ -405,6 +543,20 @@ class BettingSimulation {
                 this.checkForBets();
             }
         }, this.updateFrequency);
+    }
+
+    /**
+     * Start conversation checking (more frequent than main betting loop)
+     */
+    startConversationChecking() {
+        // Check for conversations every 5 seconds (much more frequent than betting updates)
+        this.conversationInterval = setInterval(() => {
+            if (this.isRunning && !this.isPaused) {
+                this.checkForConversations();
+            }
+        }, 5000);
+        
+        this.log('💬 Conversation checking started (every 5 seconds)', 'info');
     }
 
     /**
@@ -624,6 +776,9 @@ class BettingSimulation {
         
         this.log(`New bet for ${character.name}: ${bet.selection_combo} ${bet.selection_line}`, 'info');
         
+        // Add bet to ticker tape
+        this.addBetToTicker(bet);
+        
         // Add bet to active bets
         this.activeBets.set(bet.id, bet);
         character.activeBets.push(bet.id);
@@ -636,6 +791,114 @@ class BettingSimulation {
     }
 
     /**
+     * Add bet information to ticker tape
+     * @param {Object} bet - Bet object
+     */
+    addBetToTicker(bet) {
+        // Use the formatted ticker function (not upcoming since this is a live bet)
+        this.addBetToTickerFormatted(bet, false);
+    }
+
+    /**
+     * Populate ticker with actual upcoming bets from database
+     */
+    populateTickerWithUpcomingBets() {
+        if (!this.renderer || !this.renderer.addBetToTicker) return;
+        if (!this.betQueue || this.betQueue.length === 0) return;
+        
+        // Get upcoming bets (next 8-10 bets that haven't been processed yet)
+        const upcomingBets = this.betQueue.slice(this.currentBetIndex, this.currentBetIndex + 10);
+        
+        this.log(`Populating ticker with ${upcomingBets.length} upcoming bets from database`, 'info');
+        
+        // Clear existing ticker first
+        if (this.renderer.clearTicker) {
+            this.renderer.clearTicker();
+        }
+        
+        // Add upcoming bets with delays to make it look more realistic
+        upcomingBets.forEach((bet, index) => {
+            setTimeout(() => {
+                this.addBetToTickerFormatted(bet, true);
+            }, index * 1000); // 1 second intervals (faster initial population)
+        });
+    }
+
+    /**
+     * Format and add bet to ticker (separate from processNewBet to avoid duplication)
+     */
+    addBetToTickerFormatted(bet, isUpcoming = false) {
+        if (!this.renderer || !this.renderer.addBetToTicker) return;
+        
+        // Format bet for ticker display
+        let tickerText = '';
+        
+        // Add character emoji
+        const characterEmojis = {
+            'Benny': '🅱️',
+            'Max': '🅜️',
+            'Ellie': '🅴️'
+        };
+        tickerText += characterEmojis[bet.character] || '⚡';
+        
+        // Add upcoming indicator
+        if (isUpcoming) {
+            tickerText += ' UPCOMING: ';
+        } else {
+            tickerText += ' LIVE: ';
+        }
+        
+        // Add character name
+        tickerText += `${bet.character} - `;
+        
+        // Add selection info
+        if (bet.selection_combo && bet.selection_line !== undefined && bet.selection_line !== null) {
+            if (bet.selection_combo.toLowerCase().includes('over')) {
+                tickerText += `Over ${bet.selection_line} Goals`;
+            } else if (bet.selection_combo.toLowerCase().includes('under')) {
+                tickerText += `Under ${bet.selection_line} Goals`;
+            } else if (bet.selection_combo.toLowerCase().includes('handicap') || bet.selection_combo.toLowerCase().includes('asian')) {
+                const line = bet.selection_line >= 0 ? `+${bet.selection_line}` : bet.selection_line;
+                tickerText += `Handicap ${line}`;
+            } else if (bet.selection_combo.toLowerCase().includes('home')) {
+                const line = bet.selection_line >= 0 ? `+${bet.selection_line}` : bet.selection_line;
+                tickerText += `Home Team ${line}`;
+            } else if (bet.selection_combo.toLowerCase().includes('away')) {
+                const line = bet.selection_line >= 0 ? `+${bet.selection_line}` : bet.selection_line;
+                tickerText += `Away Team ${line}`;
+            } else {
+                tickerText += `${bet.selection_combo} ${bet.selection_line}`;
+            }
+        } else if (bet.recommendation) {
+            // Use recommendation if available
+            tickerText += bet.recommendation.substring(0, 30) + (bet.recommendation.length > 30 ? '...' : '');
+        } else {
+            tickerText += 'Special Bet';
+        }
+        
+        // Add odds
+        if (bet.price) {
+            tickerText += ` @ ${bet.price}`;
+        }
+        
+        // Add stake
+        if (bet.stake) {
+            const stake = typeof bet.stake === 'string' ? 
+                parseFloat(bet.stake.replace(/[£$€,]/g, '')) : bet.stake;
+            tickerText += ` (£${stake})`;
+        }
+        
+        // Add to ticker
+        this.renderer.addBetToTicker(tickerText);
+        
+        if (isUpcoming) {
+            this.log(`Added upcoming bet to ticker: ${tickerText}`, 'info');
+        } else {
+            this.log(`Added live bet to ticker: ${tickerText}`, 'info');
+        }
+    }
+
+    /**
      * Start character walking to bookie
      * @param {Object} character - Character object
      * @param {Object} bet - Bet object
@@ -644,6 +907,9 @@ class BettingSimulation {
         character.state = 'walking_to_bookie';
         character.targetPosition = this.renderer.getBookiePosition();
         character.emotion = { emoji: '🚶', state: 'walking', description: 'Walking to bookie' };
+        
+        // Update 3D character animation
+        this.renderer.updateCharacter(character.name, 'walking_to_bookie', character.emotion, character.position);
         
         // Simulate walking time (2-5 seconds)
         const walkTime = 2000 + Math.random() * 3000;
@@ -663,6 +929,9 @@ class BettingSimulation {
     async placeBet(character, bet) {
         character.state = 'placing_bet';
         character.emotion = { emoji: '💰', state: 'placing', description: 'Placing bet' };
+        
+        // Update 3D character animation
+        this.renderer.updateCharacter(character.name, 'placing_bet', character.emotion, character.position);
         
         // Deduct stake from bankroll - fix stake parsing
         let stake = 0;
@@ -700,6 +969,8 @@ class BettingSimulation {
             character.position = this.renderer.getStartingPosition(character.name);
             character.targetPosition = null;
             character.emotion = { emoji: '🤞', state: 'waiting', description: 'Waiting for result' };
+            // Update 3D character to waiting state
+            this.renderer.updateCharacter(character.name, 'idle', character.emotion, character.position);
             this.updateCharacterUI(character);
         }, 1000);
         
@@ -846,6 +1117,9 @@ class BettingSimulation {
         character.emotion = emotion;
         character.state = emotion.state;
         
+        // Update 3D character animation for bet result
+        this.renderer.updateCharacter(character.name, emotion.state, emotion, character.position);
+        
         // Update stats
         if (result.startsWith('Win')) {
             character.stats.totalWins++;
@@ -882,6 +1156,8 @@ class BettingSimulation {
         setTimeout(() => {
             character.state = 'idle';
             character.emotion = { emoji: '😐', state: 'neutral', description: 'Ready for next bet' };
+            // Update 3D character to idle state
+            this.renderer.updateCharacter(character.name, 'idle', character.emotion, character.position);
             this.updateCharacterUI(character);
         }, 5000);
         
@@ -936,6 +1212,9 @@ class BettingSimulation {
         const emotion = getInProgressEmotion(prediction);
         character.emotion = emotion;
         character.state = emotion.state;
+        
+        // Update 3D character animation for in-progress state
+        this.renderer.updateCharacter(character.name, emotion.state, emotion, character.position);
         
         this.log(`${character.name} bet in progress: ${prediction}`, 'info');
         
@@ -1027,6 +1306,28 @@ class BettingSimulation {
         }).join('');
         
         container.innerHTML = betsHtml;
+    }
+
+    /**
+     * Update renderer status in UI
+     */
+    updateRendererStatus() {
+        const statusText = document.getElementById('statusText');
+        if (statusText && this.rendererType) {
+            const rendererInfo = {
+                '3D': '🌐 3D Mode (Three.js)',
+                '2D': '🎨 2D Mode (Canvas)',
+                'minimal': '📱 Text Mode Only'
+            };
+            
+            const currentText = statusText.textContent;
+            const rendererStatus = rendererInfo[this.rendererType] || '❓ Unknown';
+            
+            // Only update if not already showing
+            if (!currentText.includes('Mode')) {
+                statusText.textContent = `${currentText} - ${rendererStatus}`;
+            }
+        }
     }
 
     /**
@@ -1214,11 +1515,409 @@ class BettingSimulation {
             // Silently fail if audio doesn't work
         }
     }
+
+    // ===========================================
+    // CONVERSATION SYSTEM
+    // ===========================================
+
+    /**
+     * Conversation topics and dialogue
+     */
+    getConversationTopics() {
+        return {
+            general: {
+                title: "General Chat",
+                class: "general",
+                dialogues: [
+                    { 
+                        starter: "{character1}", 
+                        text: "Beautiful day for some betting, eh {character2}?",
+                        response: "Absolutely! Though I hope my luck is better today than yesterday."
+                    },
+                    { 
+                        starter: "{character1}", 
+                        text: "How's your bankroll looking, {character2}?",
+                        response: "Could be better, but I'm still in the game. You?"
+                    },
+                    { 
+                        starter: "{character1}", 
+                        text: "Seen any good odds lately?",
+                        response: "I've been watching the Asian Handicap markets. Some real value there."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "This weather is perfect for outdoor matches!",
+                        response: "True! I always feel like over bets hit more on sunny days."
+                    }
+                ]
+            },
+            betting: {
+                title: "Betting Strategy",
+                class: "betting",
+                dialogues: [
+                    {
+                        starter: "{character1}",
+                        text: "I'm thinking of backing the underdog today. What do you think?",
+                        response: "Risky move! But sometimes the biggest upsets come from nowhere."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "Asian Handicap or straight win? I can't decide...",
+                        response: "Handicap gives you better value, but straight wins are easier to predict."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "Over/Under markets are looking juicy today!",
+                        response: "I love totals betting! Much easier than picking winners sometimes."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "Should I hedge my position or let it ride?",
+                        response: "Depends on your risk tolerance. I usually let winners run!"
+                    }
+                ]
+            },
+            celebration: {
+                title: "Celebrating Wins",
+                class: "celebration",
+                dialogues: [
+                    {
+                        starter: "{character1}",
+                        text: "Yes! That Over 2.5 just hit in the 89th minute!",
+                        response: "Nice one! Those late goals are the best feeling in the world!"
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "My handicap bet is looking great so far!",
+                        response: "Nothing beats that feeling when your pick is ahead early!"
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "Three wins in a row! I'm on fire today!",
+                        response: "Keep that momentum going! Though don't get too cocky..."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "The odds were against me but I knew it would hit!",
+                        response: "That's the beauty of betting - sometimes gut feelings pay off big!"
+                    }
+                ]
+            },
+            commiseration: {
+                title: "Bad Luck",
+                class: "commiseration",
+                dialogues: [
+                    {
+                        starter: "{character1}",
+                        text: "Can you believe that? Lost by half a goal...",
+                        response: "Oof, that's the worst! Asian Handicap losses sting the most."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "My Over bet would have hit if not for that red card!",
+                        response: "Red cards kill so many Over bets. Just bad luck, mate."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "I'm having the worst run of luck this week...",
+                        response: "We've all been there. Sometimes you just have to ride out the storm."
+                    },
+                    {
+                        starter: "{character1}",
+                        text: "That was such an obvious fix! No way that was natural!",
+                        response: "Ha! We all blame corruption when our bets don't hit. It happens!"
+                    }
+                ]
+            }
+        };
+    }
+
+    /**
+     * Check for nearby characters and potentially start conversations
+     */
+    checkForConversations() {
+        if (!this.renderer) {
+            this.log('No renderer available for conversation checking', 'warning');
+            return;
+        }
+
+        const characterNames = Object.keys(this.characters);
+        const now = Date.now();
+
+        this.log(`🔍 Checking conversations for ${characterNames.length} characters...`, 'info');
+
+        // Check all character pairs
+        for (let i = 0; i < characterNames.length; i++) {
+            for (let j = i + 1; j < characterNames.length; j++) {
+                const char1Name = characterNames[i];
+                const char2Name = characterNames[j];
+                const char1 = this.characters[char1Name];
+                const char2 = this.characters[char2Name];
+
+                // Debug: Log character positions and states
+                this.log(`📍 ${char1Name}: pos(${char1.position.x.toFixed(1)}, ${char1.position.z || 0}) state: ${char1.state}`, 'info');
+                this.log(`📍 ${char2Name}: pos(${char2.position.x.toFixed(1)}, ${char2.position.z || 0}) state: ${char2.state}`, 'info');
+
+                // Skip if either character is busy with betting activities
+                if (this.isCharacterBusy(char1) || this.isCharacterBusy(char2)) {
+                    this.log(`⏸️ ${char1Name} or ${char2Name} is busy (${char1.state}, ${char2.state})`, 'info');
+                    continue;
+                }
+
+                // Check cooldown (characters can't chat too frequently)
+                const pairKey = [char1Name, char2Name].sort().join('-');
+                const lastConversation = this.conversationCooldowns.get(pairKey) || 0;
+                const timeSinceLastChat = now - lastConversation;
+                if (timeSinceLastChat < 10000) { // 10 second cooldown (reduced from 30)
+                    this.log(`🕒 ${char1Name}-${char2Name} still on cooldown (${(10000 - timeSinceLastChat)/1000}s remaining)`, 'info');
+                    continue;
+                }
+
+                // Check if characters are close enough to chat
+                const distance = this.getCharacterDistance(char1, char2);
+                this.log(`📏 Distance between ${char1Name} and ${char2Name}: ${distance.toFixed(1)} units (max: ${this.conversationRange})`, 'info');
+                
+                if (this.areCharactersNearby(char1, char2)) {
+                    this.log(`✅ ${char1Name} and ${char2Name} are close enough to chat!`, 'success');
+                    // Random chance for conversation
+                    if (Math.random() < this.conversationChance) {
+                        this.log(`🎲 Conversation chance hit! Starting conversation...`, 'success');
+                        this.startConversation(char1Name, char2Name);
+                        this.conversationCooldowns.set(pairKey, now);
+                    } else {
+                        this.log(`🎲 Conversation chance missed (${(this.conversationChance * 100)}%)`, 'info');
+                    }
+                } else {
+                    this.log(`❌ ${char1Name} and ${char2Name} are too far apart for conversation`, 'info');
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if character is busy with betting activities
+     */
+    isCharacterBusy(character) {
+        // Only consider characters busy if they're actively betting - allow conversations during emotions
+        const busyStates = ['walking_to_bookie', 'placing_bet'];
+        const isBusy = busyStates.includes(character.state);
+        
+        // Debug log for troubleshooting
+        if (isBusy) {
+            this.log(`🚫 ${character.name} is busy: ${character.state}`, 'info');
+        }
+        
+        return isBusy;
+    }
+
+    /**
+     * Get distance between two characters
+     */
+    getCharacterDistance(char1, char2) {
+        if (!char1.position || !char2.position) return Infinity;
+
+        const dx = char1.position.x - char2.position.x;
+        const dz = (char1.position.z || 0) - (char2.position.z || 0);
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    /**
+     * Check if two characters are close enough to have a conversation
+     */
+    areCharactersNearby(char1, char2) {
+        const distance = this.getCharacterDistance(char1, char2);
+        return distance <= this.conversationRange;
+    }
+
+    /**
+     * Start a conversation between two characters
+     */
+    startConversation(char1Name, char2Name) {
+        const char1 = this.characters[char1Name];
+        const char2 = this.characters[char2Name];
+
+        // Determine conversation topic based on character states and recent history
+        const topic = this.selectConversationTopic(char1, char2);
+        const topicData = this.getConversationTopics()[topic];
+        
+        // Select random dialogue from topic
+        const dialogue = topicData.dialogues[Math.floor(Math.random() * topicData.dialogues.length)];
+        
+        // Replace placeholders with character names
+        let starter = dialogue.starter.replace('{character1}', char1Name).replace('{character2}', char2Name);
+        let text = dialogue.text.replace('{character1}', char1Name).replace('{character2}', char2Name);
+        let response = dialogue.response.replace('{character1}', char1Name).replace('{character2}', char2Name);
+
+        // Determine who starts the conversation
+        let starterName, responderName;
+        if (starter.includes(char1Name) || Math.random() < 0.5) {
+            starterName = char1Name;
+            responderName = char2Name;
+        } else {
+            starterName = char2Name;
+            responderName = char1Name;
+        }
+
+        // Create conversation object
+        const conversation = {
+            id: Date.now(),
+            participants: [starterName, responderName],
+            topic: topic,
+            topicTitle: topicData.title,
+            topicClass: topicData.class,
+            starter: starterName,
+            text: text,
+            response: response,
+            timestamp: new Date()
+        };
+
+        // Add to conversation history
+        this.conversationHistory.push(conversation);
+
+        // Keep only last 10 conversations
+        if (this.conversationHistory.length > 10) {
+            this.conversationHistory.shift();
+        }
+
+        // Display conversation in UI
+        this.displayConversation(conversation);
+
+        // Log the conversation
+        this.log(`💬 ${starterName} & ${responderName} chatting about ${topicData.title.toLowerCase()}`, 'info');
+    }
+
+    /**
+     * Select appropriate conversation topic based on character states
+     */
+    selectConversationTopic(char1, char2) {
+        // Check recent bet outcomes for celebration/commiseration topics
+        const char1RecentWin = char1.emotion.state === 'joy' || char1.emotion.state === 'relief';
+        const char2RecentWin = char2.emotion.state === 'joy' || char2.emotion.state === 'relief';
+        const char1RecentLoss = char1.emotion.state === 'anger' || char1.emotion.state === 'annoyed';
+        const char2RecentLoss = char2.emotion.state === 'anger' || char2.emotion.state === 'annoyed';
+
+        // If both won recently, celebrate together
+        if (char1RecentWin && char2RecentWin) {
+            return 'celebration';
+        }
+
+        // If both lost recently, commiserate together
+        if (char1RecentLoss && char2RecentLoss) {
+            return 'commiseration';
+        }
+
+        // If one won and one lost, maybe general chat or betting talk
+        if ((char1RecentWin && char2RecentLoss) || (char1RecentLoss && char2RecentWin)) {
+            return Math.random() < 0.7 ? 'general' : 'betting';
+        }
+
+        // If characters are waiting or thinking, betting talk is more likely
+        if (char1.emotion.state === 'thinking' || char2.emotion.state === 'thinking' ||
+            char1.emotion.state === 'hopeful' || char2.emotion.state === 'hopeful' ||
+            char1.emotion.state === 'worried' || char2.emotion.state === 'worried') {
+            return Math.random() < 0.6 ? 'betting' : 'general';
+        }
+
+        // Default to general conversation or betting strategy
+        return Math.random() < 0.5 ? 'general' : 'betting';
+    }
+
+    /**
+     * Display conversation in UI
+     */
+    displayConversation(conversation) {
+        const conversationArea = document.getElementById('conversationArea');
+        if (!conversationArea) return;
+
+        // Remove "no conversations" message if it exists
+        const noConversations = conversationArea.querySelector('.no-conversations');
+        if (noConversations) {
+            noConversations.remove();
+        }
+
+        // Create conversation element
+        const conversationEl = document.createElement('div');
+        conversationEl.className = 'conversation-item';
+        conversationEl.innerHTML = `
+            <div class="conversation-avatars">
+                <div class="conversation-avatar ${conversation.participants[0].toLowerCase()}">${conversation.participants[0][0]}</div>
+                <div class="conversation-avatar ${conversation.participants[1].toLowerCase()}">${conversation.participants[1][0]}</div>
+            </div>
+            <div class="conversation-content">
+                <div class="conversation-topic ${conversation.topicClass}">${conversation.topicTitle}</div>
+                <div class="conversation-participants">${conversation.participants.join(' & ')}</div>
+                <div class="conversation-text">
+                    <strong>${conversation.starter}:</strong> "${conversation.text}"<br>
+                    <strong>${conversation.participants.find(p => p !== conversation.starter)}:</strong> "${conversation.response}"
+                </div>
+            </div>
+        `;
+
+        // Add to conversation area (newest first)
+        conversationArea.insertBefore(conversationEl, conversationArea.firstChild);
+
+        // Remove old conversations if too many
+        const conversations = conversationArea.querySelectorAll('.conversation-item');
+        if (conversations.length > 5) {
+            conversations[conversations.length - 1].remove();
+        }
+
+        // Auto-scroll to show new conversation
+        conversationArea.scrollTop = 0;
+    }
+
+    /**
+     * Manual conversation test (can be called from console)
+     */
+    testConversation() {
+        this.log('🧪 Manual conversation test initiated...', 'info');
+        
+        // Clear cooldowns for testing
+        this.conversationCooldowns.clear();
+        
+        // Force a conversation between first two characters
+        const characterNames = Object.keys(this.characters);
+        if (characterNames.length >= 2) {
+            this.log(`🧪 Forcing conversation between ${characterNames[0]} and ${characterNames[1]}`, 'info');
+            this.startConversation(characterNames[0], characterNames[1]);
+        } else {
+            this.log('🧪 Not enough characters for conversation test', 'warning');
+        }
+    }
+
+    /**
+     * Debug character positions and states
+     */
+    debugCharacters() {
+        Object.keys(this.characters).forEach(name => {
+            const char = this.characters[name];
+            this.log(`🔍 ${name}: pos(${char.position.x.toFixed(1)}, ${char.position.z || 0}) state: ${char.state} emotion: ${char.emotion.state}`, 'info');
+        });
+    }
 }
 
 // Initialize simulation when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.simulation = new BettingSimulation();
+    // Wait a bit to ensure all scripts are loaded
+    setTimeout(() => {
+        try {
+            console.log('Initializing BettingSimulation...');
+            console.log('THREE available:', typeof THREE !== 'undefined');
+            console.log('ThreeRenderer available:', typeof ThreeRenderer !== 'undefined');
+            
+            window.simulation = new BettingSimulation();
+            console.log('BettingSimulation initialized successfully');
+        } catch (error) {
+            console.error('Error initializing simulation:', error);
+            
+            // Show error in UI
+            const statusText = document.getElementById('statusText');
+            if (statusText) {
+                statusText.textContent = 'Initialization failed - check console';
+                statusText.style.color = 'red';
+            }
+        }
+    }, 200);
 });
 
 // Cleanup on page unload

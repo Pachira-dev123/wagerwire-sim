@@ -293,14 +293,12 @@ function getInProgressEmotion(prediction) {
 }
 
 // Export functions for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        evaluateGoalLine,
-        evaluateHandicap,
-        calculateEnhancedPredictedResult,
-        calculatePredictedResult,
-        calculatePayout,
-        getEmotionFromResult,
-        getInProgressEmotion
-    };
-} 
+export {
+    evaluateGoalLine,
+    evaluateHandicap,
+    calculateEnhancedPredictedResult,
+    calculatePredictedResult,
+    calculatePayout,
+    getEmotionFromResult,
+    getInProgressEmotion
+}; 

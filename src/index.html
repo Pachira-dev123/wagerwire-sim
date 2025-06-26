@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WagerWire Betting Simulation</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- Styles will be injected by webpack -->
     
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -38,9 +38,9 @@
 
         <div class="simulation-area">
             <div class="city-container">
-                <canvas id="cityCanvas" width="800" height="600"></canvas>
+                <div id="threeContainer" class="three-container"></div>
                 <div class="city-overlay">
-                    <div class="bookie-sign">🏪 BOOKIE</div>
+                    <div class="bookie-sign">🏪 BOOKIE HUB</div>
                 </div>
             </div>
 
@@ -113,6 +113,13 @@
             </div>
         </div>
 
+        <div class="conversations-panel">
+            <h3>💬 Character Conversations</h3>
+            <div id="conversationArea" class="conversation-area">
+                <div class="no-conversations">Characters will chat between bets...</div>
+            </div>
+        </div>
+
         <div class="logs-panel">
             <h3>Simulation Logs</h3>
             <div id="logs" class="logs-container"></div>
@@ -120,11 +127,6 @@
     </div>
 
     <!-- Scripts -->
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="js/config.js"></script>
-    <script src="js/betting-engine.js"></script>
-    <script src="js/supabase-client.js"></script>
-    <script src="js/canvas-renderer.js"></script>
-    <script src="js/simulation.js"></script>
+    <!-- All JavaScript will be bundled by webpack -->
 </body>
 </html> 

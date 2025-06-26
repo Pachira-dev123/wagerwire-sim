@@ -4,7 +4,7 @@
  * Run 'npm run build-config' to regenerate
  */
 
-class Config {
+export class Config {
     constructor() {
         this.supabaseUrl = null;
         this.supabaseKey = null;

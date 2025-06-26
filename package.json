@@ -5,9 +5,10 @@
   "main": "index.html",
   "scripts": {
     "build-config": "node build-config.js",
-    "start": "npm run build-config && npx http-server . -p 3000 -o",
-    "dev": "npm run build-config && npx http-server . -p 3000 -o",
-    "serve": "npx http-server . -p 3000 -o"
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development",
+    "start": "npm run dev",
+    "serve": "npx http-server dist -p 3000 -o"
   },
   "keywords": [
     "betting",
@@ -20,6 +21,28 @@
   "license": "MIT",
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "three": "^0.177.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pachira-dev123/wagerwire-sim.git"
+  },
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Pachira-dev123/wagerwire-sim/issues"
+  },
+  "homepage": "https://github.com/Pachira-dev123/wagerwire-sim#readme",
+  "devDependencies": {
+    "@babel/core": "^7.27.7",
+    "@babel/preset-env": "^7.27.2",
+    "babel-loader": "^10.0.0",
+    "copy-webpack-plugin": "^13.0.0",
+    "css-loader": "^7.1.2",
+    "html-webpack-plugin": "^5.6.3",
+    "style-loader": "^4.0.0",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
   }
-} 
+}

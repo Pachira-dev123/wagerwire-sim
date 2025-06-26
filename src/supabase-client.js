@@ -3,7 +3,7 @@
  * Handles database connections and bet data operations
  */
 
-class SupabaseClient {
+export class SupabaseClient {
     constructor() {
         this.client = null;
         this.connected = false;
@@ -39,11 +39,39 @@ class SupabaseClient {
                 .limit(1);
             
             if (error) {
-                throw error;
+                // If the default table doesn't exist, try to find a suitable one
+                if (error.code === 'PGRST116') {
+                    this.log(`Table '${this.tableName}' not found, searching for available tables...`, 'warning');
+                    
+                    try {
+                        const foundTables = await this.findBettingTables();
+                        if (foundTables.length > 0) {
+                            this.tableName = foundTables[0];
+                            this.log(`Using table: ${this.tableName}`, 'info');
+                            
+                            // Test again with the found table
+                            const { data: testData, error: testError } = await this.client
+                                .from(this.tableName)
+                                .select('id')
+                                .limit(1);
+                            
+                            if (testError) {
+                                throw testError;
+                            }
+                        } else {
+                            throw new Error('No suitable betting tables found in database');
+                        }
+                    } catch (tableError) {
+                        this.log(`Table search failed: ${tableError.message}`, 'error');
+                        throw new Error(`Connection failed: ${error.message}. No suitable tables found.`);
+                    }
+                } else {
+                    throw error;
+                }
             }
             
             this.connected = true;
-            this.log('Successfully connected to Supabase', 'success');
+            this.log(`Successfully connected to Supabase using table: ${this.tableName}`, 'success');
             return true;
             
         } catch (error) {
@@ -101,41 +129,69 @@ class SupabaseClient {
         }
 
         try {
-            const { data, error } = await this.client
+            // Build query with better error handling
+            let query = this.client
                 .from(this.tableName)
                 .select('*')
-                .gt('timestamp', lastCheckTime)
-                .is('result', null)
-                .in('extract_names', ['Benny', 'Max', 'Ellie']) // Map to character names
                 .order('timestamp', { ascending: true });
 
-            if (error) {
-                throw error;
+            // Add time filter if provided
+            if (lastCheckTime) {
+                query = query.gt('timestamp', lastCheckTime);
             }
 
-            // Transform the data to match expected format
-            const transformedData = data.map(bet => ({
-                id: bet.id,
-                created_at: bet.timestamp,
-                character: bet.extract_names, // Map extract_names to character
-                stake: bet.stake,
-                eventid: bet.eventid,
-                price: bet.price,
-                selection_combo: bet.selection_combo,
-                selection_line: bet.selection_line,
-                bet_time_score: bet.bet_time_score,
-                result: bet.result,
+            // Add result filter if column exists
+            try {
+                query = query.is('result', null);
+            } catch (columnError) {
+                this.log('Result column not found, skipping result filter', 'warning');
+            }
+
+            // Add character name filter if column exists
+            try {
+                query = query.in('extract_names', ['Benny', 'Max', 'Ellie']);
+            } catch (columnError) {
+                this.log('extract_names column not found, skipping character filter', 'warning');
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                // Handle specific database errors
+                if (error.code === 'PGRST116') {
+                    throw new Error(`Table '${this.tableName}' not found or access denied`);
+                } else if (error.code === 'PGRST204') {
+                    this.log('No data found in table', 'info');
+                    return [];
+                } else {
+                    throw error;
+                }
+            }
+
+            // Transform the data to match expected format with safe property access
+            const transformedData = (data || []).map(bet => ({
+                id: bet.id || Math.random().toString(36),
+                created_at: bet.timestamp || bet.created_at || new Date().toISOString(),
+                character: bet.extract_names || bet.character || 'Benny', // Default to Benny
+                stake: parseFloat(bet.stake) || 10,
+                eventid: bet.eventid || 'unknown',
+                price: parseFloat(bet.price) || 2.0,
+                selection_combo: bet.selection_combo || 'Over 2.5',
+                selection_line: bet.selection_line || null,
+                bet_time_score: bet.bet_time_score || '0-0',
+                result: bet.result || null,
                 placed_at: bet.placed_at || null,
                 settled_at: bet.settled_at || null,
-                payout: bet.payout || null,
+                payout: bet.payout ? parseFloat(bet.payout) : null,
                 characterReaction: bet.characterReaction || null
             }));
 
-            this.log(`Fetched ${transformedData.length} new bets since ${lastCheckTime}`, 'info');
-            return transformedData || [];
+            this.log(`Fetched ${transformedData.length} new bets since ${lastCheckTime || 'beginning'}`, 'info');
+            return transformedData;
         } catch (error) {
             this.log(`Error fetching new bets: ${error.message}`, 'error');
-            throw error;
+            // Don't throw error, return empty array to keep simulation running
+            return [];
         }
     }
 
