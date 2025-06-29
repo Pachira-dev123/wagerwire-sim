@@ -1032,7 +1032,7 @@ export class BettingSimulation {
             
             if (
                 (event.status === 'finished' && (event.score || event.homeScore !== undefined)) ||
-                event.status === 'cancelled'
+                event.status === 'canceled'
             ) {
                 // Bet is finished, settle it
                 this.log(`Event ${bet.eventid} is finished, settling bet...`, 'info');
@@ -1063,11 +1063,11 @@ export class BettingSimulation {
         // Use parsed stake if available
         const stake = bet.parsedStake || 100;
     
-        // 🛑 Handle cancelled event as Push
-        if (event.status === 'cancelled') {
-            this.log(`Event ${bet.eventid} was cancelled. Marking bet as Push`, 'warning');
+        // 🛑 Handle canceled event as Push
+        if (event.status === 'canceled') {
+            this.log(`Event ${bet.eventid} was canceled. Marking bet as Push`, 'warning');
     
-            const result = 'Push - Cancelled Event';
+            const result = 'Push - Canceled Event';
             const payout = stake;
     
             character.bankroll += payout;
