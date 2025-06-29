@@ -1030,7 +1030,10 @@ export class BettingSimulation {
             console.log(`Event ${bet.eventid} data:`, event);
             this.log(`Event ${bet.eventid} status: ${event.status}`, 'info');
             
-            if (event.status === 'finished' && (event.score || event.homeScore !== undefined)) {
+            if (
+                (event.status === 'finished' && (event.score || event.homeScore !== undefined)) ||
+                event.status === 'cancelled'
+            ) {
                 // Bet is finished, settle it
                 this.log(`Event ${bet.eventid} is finished, settling bet...`, 'info');
                 await this.settleBet(bet, event, character);
@@ -1057,110 +1060,100 @@ export class BettingSimulation {
      * @param {Object} character - Character object
      */
     async settleBet(bet, event, character) {
-        // Use YOUR betting engine to calculate the result
-        const finalScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
-        
-        this.log(`Settling bet for event ${bet.eventid}: Final score ${finalScore}`, 'info');
-        
-        // Debug: Log all available fields in the bet object
-        this.log(`Available bet fields: ${Object.keys(bet.originalData || bet).join(', ')}`, 'info');
-        this.log(`Bet data: ${JSON.stringify(bet.originalData || bet, null, 2)}`, 'info');
-        
-        // Use the Bet_Selection field if available, otherwise try to map selection_combo
-        let selectionCombo = bet.Bet_Selection || bet.bet_selection;
-        
-        if (!selectionCombo) {
-            // Fallback: try to extract from selection_combo or recommendation
-            const rec = (bet.selection_combo || bet.recommendation || '').toLowerCase();
-            if (rec.includes('over')) {
-                selectionCombo = 'Over';
-            } else if (rec.includes('under')) {
-                selectionCombo = 'Under';
-            } else if (rec.includes('home') || rec.includes('handicap')) {
-                // For handicap bets, we need to determine home vs away
-                // For now, let's check if the line is positive or negative as a hint
-                selectionCombo = bet.selection_line >= 0 ? 'Away Team' : 'Home Team';
-            } else {
-                selectionCombo = 'Home Team'; // Default fallback
-            }
+        // Use parsed stake if available
+        const stake = bet.parsedStake || 100;
+    
+        // 🛑 Handle cancelled event as Push
+        if (event.status === 'cancelled') {
+            this.log(`Event ${bet.eventid} was cancelled. Marking bet as Push`, 'warning');
+    
+            const result = 'Push - Cancelled Event';
+            const payout = stake;
+    
+            character.bankroll += payout;
+            character.stats.totalPayout += payout;
+            character.stats.totalBets++;
+    
+            character.emotion = getEmotionFromResult(result);
+            character.state = character.emotion.state;
+    
+            this.renderer.updateCharacter(character.name, character.state, character.emotion, character.position);
+    
+            this.activeBets.delete(bet.id);
+            character.activeBets = character.activeBets.filter(id => id !== bet.id);
+    
+            await supabaseClient.settleBet(bet.id, result, payout);
+    
+            // UI refresh
+            this.updateCharacterUI(character);
+            this.updateActiveBetsUI();
+    
+            return;
         }
-        
-        // Map common variations to expected format
+    
+        // ✅ Regular settlement for finished event
+        const finalScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
+        this.log(`Settling bet for event ${bet.eventid}: Final score ${finalScore}`, 'info');
+    
+        // Extract selectionCombo (fallback if undefined)
+        let selectionCombo = bet.Bet_Selection || bet.bet_selection;
+        if (!selectionCombo) {
+            const rec = (bet.selection_combo || bet.recommendation || '').toLowerCase();
+            if (rec.includes('over')) selectionCombo = 'Over';
+            else if (rec.includes('under')) selectionCombo = 'Under';
+            else if (rec.includes('handicap') || rec.includes('home')) selectionCombo = bet.selection_line >= 0 ? 'Away Team' : 'Home Team';
+            else selectionCombo = 'Home Team';
+        }
+    
+        // Normalize common variants
         if (selectionCombo === 'Home') selectionCombo = 'Home Team';
         if (selectionCombo === 'Away') selectionCombo = 'Away Team';
-        
+    
         this.log(`Using selection: ${selectionCombo} with line ${bet.selection_line}`, 'info');
-        
+    
         const result = calculateEnhancedPredictedResult(
             selectionCombo,
             bet.selection_line,
             bet.bet_time_score,
             finalScore
         );
-        
+    
         this.log(`Bet result calculated: ${result}`, 'info');
-        
-        // Use the pre-parsed stake
-        const stake = bet.parsedStake || 100;
-        
-        // Calculate payout using YOUR betting engine
+    
         const payout = calculatePayout(result, stake, bet.price);
-        
-        this.log(`Payout calculated: £${payout} for stake £${stake} at odds ${bet.price}`, 'info');
-        
-        // Update character bankroll
+        this.log(`Payout: £${payout} from stake £${stake} @ ${bet.price}`, 'info');
+    
         character.bankroll += payout;
         character.stats.totalPayout += payout;
-        
-        // Update character emotion using YOUR emotion system
-        const emotion = getEmotionFromResult(result);
-        character.emotion = emotion;
-        character.state = emotion.state;
-        
-        // Update 3D character animation for bet result
-        this.renderer.updateCharacter(character.name, emotion.state, emotion, character.position);
-        
-        // Update stats
-        if (result.startsWith('Win')) {
-            character.stats.totalWins++;
-        } else if (result.startsWith('Loss')) {
-            character.stats.totalLosses++;
-        }
-        
+        character.stats.totalBets++;
         character.stats.netProfit = character.stats.totalPayout - character.stats.totalStaked;
-        
-        // Play result sound
-        if (result.startsWith('Win')) {
-            this.playBeep(800, 200); // Higher pitch for wins
-        } else if (result.startsWith('Loss')) {
-            this.playBeep(300, 300); // Lower pitch for losses
-        } else {
-            this.playBeep(500, 150); // Neutral for pushes
-        }
-        
-        this.log(`${character.name} bet settled: ${result} - Payout: £${payout}`, 
-                 result.startsWith('Win') ? 'success' : 'warning');
-        
-        // Remove from active bets
+    
+        if (result.startsWith('Win')) character.stats.totalWins++;
+        if (result.startsWith('Loss')) character.stats.totalLosses++;
+    
+        character.emotion = getEmotionFromResult(result);
+        character.state = character.emotion.state;
+    
+        this.renderer.updateCharacter(character.name, character.state, character.emotion, character.position);
+    
+        // Audio cues
+        if (result.startsWith('Win')) this.playBeep(800, 200);
+        else if (result.startsWith('Loss')) this.playBeep(300, 300);
+        else this.playBeep(500, 150);
+    
+        // Cleanup
         this.activeBets.delete(bet.id);
         character.activeBets = character.activeBets.filter(id => id !== bet.id);
-        
-        // Update database with result
-        try {
-            await supabaseClient.settleBet(bet.id, result, payout);
-        } catch (error) {
-            this.log(`Error settling bet in database: ${error.message}`, 'error');
-        }
-        
-        // Reset character state after emotion display
+    
+        await supabaseClient.settleBet(bet.id, result, payout);
+    
         setTimeout(() => {
             character.state = 'idle';
             character.emotion = { emoji: '😐', state: 'neutral', description: 'Ready for next bet' };
-            // Update 3D character to idle state
             this.renderer.updateCharacter(character.name, 'idle', character.emotion, character.position);
             this.updateCharacterUI(character);
         }, 5000);
-        
+    
         this.updateCharacterUI(character);
         this.updateActiveBetsUI();
     }
