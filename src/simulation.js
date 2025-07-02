@@ -1030,6 +1030,15 @@ export class BettingSimulation {
             console.log(`Event ${bet.eventid} data:`, event);
             this.log(`Event ${bet.eventid} status: ${event.status}`, 'info');
             
+            // Debug: Log score information for troubleshooting
+            if (event.score) {
+                this.log(`Event ${bet.eventid} has score field: "${event.score}"`, 'info');
+            } else if (event.homeScore !== undefined || event.awayScore !== undefined) {
+                this.log(`Event ${bet.eventid} has individual scores: ${event.homeScore}-${event.awayScore}`, 'info');
+            } else {
+                this.log(`Event ${bet.eventid} has no score information available`, 'warning');
+            }
+            
             if (
                 (event.status === 'finished' && (event.score || event.homeScore !== undefined)) ||
                 event.status === 'canceled'
@@ -1092,7 +1101,17 @@ export class BettingSimulation {
         }
     
         // ✅ Regular settlement for finished event
-        const finalScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
+        let finalScore;
+        if (event.score) {
+            // API returns score as "5 - 0" format, normalize it to "5-0"
+            finalScore = event.score.replace(/\s+/g, '');
+        } else if (event.homeScore !== undefined && event.awayScore !== undefined) {
+            // Fallback to individual score fields
+            finalScore = `${event.homeScore}-${event.awayScore}`;
+        } else {
+            // Last resort fallback
+            finalScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
+        }
         this.log(`Settling bet for event ${bet.eventid}: Final score ${finalScore}`, 'info');
     
         // Extract selectionCombo (fallback if undefined)
@@ -1166,7 +1185,17 @@ export class BettingSimulation {
      */
     updateInProgressBet(bet, event, character) {
         // Use YOUR betting engine to calculate current prediction
-        const currentScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
+        let currentScore;
+        if (event.score) {
+            // API returns score as "5 - 0" format, normalize it to "5-0"
+            currentScore = event.score.replace(/\s+/g, '');
+        } else if (event.homeScore !== undefined && event.awayScore !== undefined) {
+            // Fallback to individual score fields
+            currentScore = `${event.homeScore}-${event.awayScore}`;
+        } else {
+            // Last resort fallback
+            currentScore = `${event.homeScore || 0}-${event.awayScore || 0}`;
+        }
         
         this.log(`In-progress bet for event ${bet.eventid}: Current score ${currentScore}`, 'info');
         
